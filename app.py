@@ -2,12 +2,10 @@ import streamlit as st
 import pickle
 import pandas as pd
 import plotly.express as px
-import time
 import base64
 import re
 import string
 import nltk
-from functools import lru_cache
 from pathlib import Path
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
@@ -65,46 +63,29 @@ def load_models():
     except Exception:
         return None, None
 
-@lru_cache(maxsize=24)
-def img_src(relative_path: str) -> str:
-    path = APP_ROOT / relative_path
-    if not path.is_file():
-        return ""
-    mime = "image/gif" if path.suffix.lower() == ".gif" else "image/png"
-    encoded = base64.b64encode(path.read_bytes()).decode()
-    return f"data:{mime};base64,{encoded}"
+@st.cache_data
+def background_data_url() -> str:
+    for name in ("assets/thousand_sunny_bg_web.jpg", "assets/thousand_sunny_bg.png"):
+        path = APP_ROOT / name
+        if path.is_file():
+            mime = "image/jpeg" if path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+            encoded = base64.b64encode(path.read_bytes()).decode()
+            return f"data:{mime};base64,{encoded}"
+    return ""
 
-custom_css = """
-<style>
+def asset_path(relative_path: str) -> Path:
+    return APP_ROOT / relative_path
+
+BASE_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Pirata+One&family=Creepster&display=swap');
 
-/* Base Theme & Background */
-@keyframes panBackground {
-    0% { background-position: 0% 0%; background-size: 100% 100%; }
-    50% { background-position: 100% 100%; background-size: 110% 110%; }
-    100% { background-position: 0% 0%; background-size: 100% 100%; }
-}
-@keyframes oceanPulse {
-    0% { filter: brightness(1) hue-rotate(0deg); }
-    50% { filter: brightness(1.2) hue-rotate(15deg); }
-    100% { filter: brightness(1) hue-rotate(0deg); }
-}
 .stApp {
-    background: linear-gradient(165deg, #0B1D3A 0%, #1a4a6e 35%, #0d2847 65%, #0B1D3A 100%);
-    background-attachment: fixed;
-    animation: oceanPulse 15s infinite alternate ease-in-out;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 /* Wooden Glassmorphism Board */
-@keyframes float {
-    0% { transform: translateY(0px) rotate(0deg); }
-    33% { transform: translateY(-5px) rotate(0.5deg); }
-    66% { transform: translateY(5px) rotate(-0.5deg); }
-    100% { transform: translateY(0px) rotate(0deg); }
-}
 .glass-card {
-    background: rgba(101, 67, 33, 0.7); /* Dark wood color */
+    background: rgba(101, 67, 33, 0.82);
     background-image: repeating-linear-gradient(
         0deg,
         transparent,
@@ -112,37 +93,14 @@ custom_css = """
         rgba(0,0,0,0.1) 20px,
         rgba(0,0,0,0.1) 21px
     );
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
     border-radius: 12px;
-    border: 5px solid #4a2e15; /* Wooden border */
+    border: 5px solid #4a2e15;
     box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 10px 30px rgba(0,0,0,0.5);
     padding: 25px;
     margin: 15px 0;
-    color: #fceea7; /* Treasure-like text color */
-    animation: float 10s ease-in-out infinite;
+    color: #fceea7;
     position: relative;
     overflow: hidden;
-}
-
-/* Particles overlay for glass-card */
-.glass-card::before {
-    content: '';
-    position: absolute;
-    top: -50%; left: -50%; width: 200%; height: 200%;
-    background-image: radial-gradient(circle, rgba(255,215,0,0.1) 10%, transparent 20%);
-    background-size: 20px 20px;
-    animation: particlesMove 20s linear infinite;
-    pointer-events: none;
-    z-index: 0;
-}
-.glass-card > * {
-    position: relative;
-    z-index: 1;
-}
-@keyframes particlesMove {
-    0% { transform: rotate(0deg) translateY(0); }
-    100% { transform: rotate(360deg) translateY(-50px); }
 }
 
 .danger-glow {
@@ -164,9 +122,7 @@ custom_css = """
 
 /* Sidebar */
 [data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(11, 29, 58, 0.95) 0%, rgba(19, 39, 68, 0.9) 100%) !important;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: linear-gradient(180deg, rgba(11, 29, 58, 0.92) 0%, rgba(19, 39, 68, 0.88) 100%) !important;
     border-right: 3px solid #8B6914;
     box-shadow: inset -4px 0 12px rgba(0,0,0,0.4);
 }
@@ -270,8 +226,6 @@ h1, h2, h3, p, label {
     height: 90px !important;
     width: 100% !important;
     transform-origin: right center;
-    animation: flagWave 3s ease-in-out infinite, fabricFold 3s ease-in-out infinite !important;
-    /* Soft wavy edges instead of sharp triangles */
     border-radius: 20px 5px 5px 40px / 30px 5px 5px 20px;
     cursor: pointer;
     position: relative;
@@ -326,7 +280,6 @@ h1, h2, h3, p, label {
 /* Text Area */
 .stTextArea textarea {
     background-color: rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(15px);
     color: white !important;
     border: 2px solid rgba(255,255,255,0.4) !important;
     border-radius: 15px !important;
@@ -534,10 +487,31 @@ div[data-baseweb="radio"] label {
     border-top-color: #ffd700 !important;
 }
 
-</style>
 """
 
-st.markdown(custom_css, unsafe_allow_html=True)
+def inject_styles():
+    bg = background_data_url()
+    if bg:
+        app_bg = f"""
+.stApp {{
+    background-image: linear-gradient(rgba(11, 29, 58, 0.25), rgba(11, 29, 58, 0.45)),
+        url("{bg}");
+    background-size: cover;
+    background-position: center center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+}}
+"""
+    else:
+        app_bg = """
+.stApp {
+    background: linear-gradient(165deg, #0B1D3A 0%, #1a4a6e 35%, #0d2847 65%, #0B1D3A 100%);
+    background-attachment: fixed;
+}
+"""
+    st.markdown(f"<style>{BASE_CSS}{app_bg}</style>", unsafe_allow_html=True)
+
+inject_styles()
 
 # Sidebar Navigation — Thousand Sunny helm
 with st.sidebar:
@@ -634,8 +608,6 @@ elif selection == NAV_ANALYZE:
                 st.error("⚓ Models missing! Add models/model.pkl and models/vectorizer.pkl to the repo.")
             else:
                 with st.spinner("⚔️ Zoro's three-sword style… slicing through spam syntax…"):
-                    time.sleep(1.5)
-
                     transformed = transform_text(email_text)
                     vectorized = vectorizer.transform([transformed])
                     prediction = model.predict(vectorized)[0]
@@ -651,54 +623,52 @@ elif selection == NAV_ANALYZE:
                     })
 
                     if prediction == 1:
-                        st.markdown(f"""
+                        st.markdown("""
                             <div class='glass-card danger-glow' style='text-align: center;'>
                                 <h2 class='op-heading' style='color: #ff9f43 !important;'>☠️ WANTED — PHISHING PIRATE!</h2>
                                 <p class="op-body">Marine alert! This mail smells like a fraudster from the New World.</p>
-                                <div style="display: flex; justify-content: center; gap: 40px; align-items: center; margin: 20px 0; flex-wrap: wrap;">
-                                    <div style="text-align: center;">
-                                        <img src="{img_src('assets/zoro_slash.png')}" class="zoro-anim" alt="Zoro">
-                                        <p style="margin: 5px 0 0 0; font-weight: bold; color: #ff9f43;">Zoro: Santoryu — spam cut down!</p>
-                                    </div>
-                                    <div style="text-align: center;">
-                                        <img src="{img_src('assets/nami_attack.png')}" class="nami-anim" alt="Nami">
-                                        <p style="margin: 5px 0 0 0; font-weight: bold; color: #ff9f43;">Nami: Bounty raised — do not open!</p>
-                                    </div>
-                                </div>
-                                <p class="berry-metric">Threat: {risk} <span>·</span> Berry confidence: {confidence:.2f}%</p>
                             </div>
                         """, unsafe_allow_html=True)
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.image(str(asset_path("assets/zoro_slash.png")), width=160)
+                            st.markdown("**Zoro:** Santoryu — spam cut down!")
+                        with c2:
+                            st.image(str(asset_path("assets/nami_attack.png")), width=160)
+                            st.markdown("**Nami:** Bounty raised — do not open!")
+                        st.markdown(
+                            f"<p class='berry-metric' style='text-align:center;'>"
+                            f"Threat: {risk} <span>·</span> Berry confidence: {confidence:.2f}%</p>",
+                            unsafe_allow_html=True,
+                        )
                     else:
-                        st.markdown(f"""
+                        st.markdown("""
                             <div class='glass-card safe-glow' style='text-align: center;'>
                                 <h2 class='op-heading' style='color: #55efc4 !important;'>✅ SAFE HARBOR — LEGIT MAIL!</h2>
                                 <p class="op-body">Shishishi! No fraud detected — feast at the Sunny's galley!</p>
-                                <div style="display: flex; justify-content: center; gap: 40px; align-items: center; margin: 20px 0; flex-wrap: wrap;">
-                                    <div style="text-align: center;">
-                                        <img src="{img_src('assets/luffy_thumbsup.png')}" class="luffy-anim" alt="Luffy">
-                                        <p style="margin: 5px 0 0 0; font-weight: bold; color: #55efc4;">Luffy: Meat party approved!</p>
-                                    </div>
-                                    <div style="text-align: center;">
-                                        <img src="{img_src('assets/chopper_happy.png')}" class="luffy-anim" alt="Chopper">
-                                        <p style="margin: 5px 0 0 0; font-weight: bold; color: #55efc4;">Chopper: All clear, doc!</p>
-                                    </div>
-                                </div>
-                                <p class="berry-metric">Threat: {risk} <span>·</span> Berry confidence: {confidence:.2f}%</p>
                             </div>
                         """, unsafe_allow_html=True)
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.image(str(asset_path("assets/luffy_thumbsup.png")), width=160)
+                            st.markdown("**Luffy:** Meat party approved!")
+                        with c2:
+                            st.image(str(asset_path("assets/chopper_happy.png")), width=160)
+                            st.markdown("**Chopper:** All clear, doc!")
+                        st.markdown(
+                            f"<p class='berry-metric' style='text-align:center;'>"
+                            f"Threat: {risk} <span>·</span> Berry confidence: {confidence:.2f}%</p>",
+                            unsafe_allow_html=True,
+                        )
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif selection == NAV_HISTORY:
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.markdown("<h2 class='op-heading'>📜 Ship's Log — Wanted Posters</h2>", unsafe_allow_html=True)
     if len(st.session_state.history) == 0:
-        st.markdown(f"""
-        <div class="wanted-poster" style="text-align:center;">
-            <img src="{img_src('assets/robin_detective.png')}" style="max-height:120px;" alt="Robin"/>
-            <h3>No bounties posted yet</h3>
-            <p>Robin says: the log is empty. Scan mail on Den Den Mushi first!</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="wanted-poster" style="text-align:center;">', unsafe_allow_html=True)
+        st.image(str(asset_path("assets/robin_detective.png")), width=120)
+        st.markdown("<h3>No bounties posted yet</h3><p>Robin says: the log is empty. Scan mail on Den Den Mushi first!</p></div>", unsafe_allow_html=True)
     else:
         df = pd.DataFrame(st.session_state.history)
         fraud_count = (df["prediction"] == "Phishing/Fraud").sum()
@@ -746,21 +716,13 @@ elif selection == NAV_STATS:
             )
             st.plotly_chart(fig_bar, use_container_width=True)
 
-        st.markdown(f"""
-        <div style="text-align:center; margin-top:12px;">
-            <img src="{img_src('assets/franky_super.png')}" style="max-height:100px;" alt="Franky"/>
-            <p class="op-body"><strong>Franky:</strong> SUPER charts! Keep scanning to fill the log pose!</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.image(str(asset_path("assets/franky_super.png")), width=100)
+        st.markdown("<p class='op-body' style='text-align:center;'><strong>Franky:</strong> SUPER charts! Keep scanning to fill the log pose!</p>", unsafe_allow_html=True)
 
     else:
-        st.markdown(f"""
-        <div class="wanted-poster" style="text-align:center;">
-            <img src="{img_src('assets/nami_attack.png')}" style="max-height:120px;" alt="Nami"/>
-            <h3>Empty chart table</h3>
-            <p>Nami needs voyage data! Analyze emails first, then return to plot the Grand Line.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="wanted-poster" style="text-align:center;">', unsafe_allow_html=True)
+        st.image(str(asset_path("assets/nami_attack.png")), width=120)
+        st.markdown("<h3>Empty chart table</h3><p>Nami needs voyage data! Analyze emails first, then return to plot the Grand Line.</p></div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif selection == NAV_ABOUT:
@@ -779,43 +741,19 @@ elif selection == NAV_ABOUT:
     - **Charts**: Plotly — Nami-approved navigation
     """)
     st.markdown("### 👒 Crew on this voyage")
-    st.markdown(f"""
-    <div class="crew-roster">
-        <div class="crew-card">
-            <img src="{img_src('assets/luffy_sprite.png')}" alt="Luffy"/>
-            <h4>Monkey D. Luffy</h4>
-            <p class="op-body">Captain — celebrates safe mail</p>
-        </div>
-        <div class="crew-card">
-            <img src="{img_src('assets/zoro_sprite.png')}" alt="Zoro"/>
-            <h4>Roronoa Zoro</h4>
-            <p class="op-body">First mate — slashes spam</p>
-        </div>
-        <div class="crew-card">
-            <img src="{img_src('assets/nami_attack.png')}" alt="Nami"/>
-            <h4>Nami</h4>
-            <p class="op-body">Navigator — risk & stats</p>
-        </div>
-        <div class="crew-card">
-            <img src="{img_src('assets/sanji_kick.png')}" alt="Sanji"/>
-            <h4>Sanji</h4>
-            <p class="op-body">Cook — kicks fraud links</p>
-        </div>
-        <div class="crew-card">
-            <img src="{img_src('assets/chopper_happy.png')}" alt="Chopper"/>
-            <h4>Chopper</h4>
-            <p class="op-body">Doctor — all-clear checks</p>
-        </div>
-        <div class="crew-card">
-            <img src="{img_src('assets/robin_detective.png')}" alt="Robin"/>
-            <h4>Nico Robin</h4>
-            <p class="op-body">Archaeologist — reads mail glyphs</p>
-        </div>
-        <div class="crew-card">
-            <img src="{img_src('assets/franky_super.png')}" alt="Franky"/>
-            <h4>Franky</h4>
-            <p class="op-body">Shipwright — SUPER dashboards</p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    crew = [
+        ("assets/luffy_sprite.png", "Monkey D. Luffy", "Captain — celebrates safe mail"),
+        ("assets/zoro_sprite.png", "Roronoa Zoro", "First mate — slashes spam"),
+        ("assets/nami_attack.png", "Nami", "Navigator — risk & stats"),
+        ("assets/sanji_kick.png", "Sanji", "Cook — kicks fraud links"),
+        ("assets/chopper_happy.png", "Chopper", "Doctor — all-clear checks"),
+        ("assets/robin_detective.png", "Nico Robin", "Archaeologist — reads mail glyphs"),
+        ("assets/franky_super.png", "Franky", "Shipwright — SUPER dashboards"),
+    ]
+    cols = st.columns(4)
+    for i, (img, name, role) in enumerate(crew):
+        with cols[i % 4]:
+            st.image(str(asset_path(img)), width=110)
+            st.markdown(f"**{name}**")
+            st.caption(role)
     st.markdown("</div>", unsafe_allow_html=True)
